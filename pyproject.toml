@@ -1,6 +1,6 @@
 [project]
 name = "jobspy2"
-version = "0.0.2"
+version = "0.0.3"
 description = "Scrape job posting from different job boards"
 authors = [{ name = "Francisco Moretti", email = "franciscoemoretti@gmail.com" }]
 readme = "README.md"

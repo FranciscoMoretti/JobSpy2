@@ -1,1 +1,1 @@
-::: jobspy2.foo
+::: jobspy2
