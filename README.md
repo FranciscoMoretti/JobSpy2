@@ -10,6 +10,8 @@ A Python library to scrape job posting from different job boards that extends ht
 
 - LinkedIn experience level filter
 
+## From JobSpy
+
 Scrape job posting from different job boards
 
 - **Github repository**: <https://github.com/franciscomoretti/jobspy2/>
