@@ -17,6 +17,16 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.2",
+    "pandas>=2.1.0",
+    "numpy==1.26.3",
+    "pydantic>=2.3.0",
+    "tls-client>=1.0.1",
+    "markdownify>=0.13.1",
+    "regex>=2024.4.28",
+]
 
 [project.urls]
 Homepage = "https://franciscomoretti.github.io/jobspy2/"
