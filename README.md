@@ -6,6 +6,10 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/franciscomoretti/jobspy2)](https://img.shields.io/github/commit-activity/m/franciscomoretti/jobspy2)
 [![License](https://img.shields.io/github/license/franciscomoretti/jobspy2)](https://img.shields.io/github/license/franciscomoretti/jobspy2)
 
+A Python library to scrape job posting from different job boards that extends https://github.com/Bunsly/JobSpy/tree/main by providing:
+
+- LinkedIn experience level filter
+
 Scrape job posting from different job boards
 
 - **Github repository**: <https://github.com/franciscomoretti/jobspy2/>
