@@ -27,7 +27,7 @@ from ...jobs import (
     JobType,
     Location,
 )
-from .. import Scraper, ScraperInput, Site
+from .. import LinkedInExperienceLevel, Scraper, ScraperInput, Site
 from ..exceptions import LinkedInException
 from ..utils import (
     create_logger,
@@ -41,6 +41,16 @@ from ..utils import (
 from .constants import headers
 
 logger = create_logger("LinkedIn")
+
+# Map from experience level to the number
+experience_level_map = {
+    LinkedInExperienceLevel.ENTRY_LEVEL: "1",
+    LinkedInExperienceLevel.ASSOCIATE: "2",
+    LinkedInExperienceLevel.MID_LEVEL: "3",
+    LinkedInExperienceLevel.SENIOR_LEVEL: "4",
+    LinkedInExperienceLevel.DIRECTOR: "5",
+    LinkedInExperienceLevel.EXECUTIVE: "6",
+}
 
 
 class LinkedInScraper(Scraper):
@@ -134,6 +144,9 @@ class LinkedInScraper(Scraper):
             "location": self.scraper_input.location,
             "distance": self.scraper_input.distance,
             "f_WT": 2 if self.scraper_input.is_remote else None,
+            "f_E": ",".join(map(experience_level_map.get, self.scraper_input.linkedin_experience_levels))
+            if self.scraper_input.linkedin_experience_levels
+            else None,
             "f_JT": (self.job_type_code(self.scraper_input.job_type) if self.scraper_input.job_type else None),
             "pageNum": 0,
             "start": start,

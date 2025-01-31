@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 
 from .jobs import JobType, Location
-from .scrapers import Country, JobResponse, SalarySource, ScraperInput, Site
+from .scrapers import Country, JobResponse, LinkedInExperienceLevel, SalarySource, ScraperInput, Site
 from .scrapers.exceptions import (
     GlassdoorException as GlassdoorException,
 )
@@ -125,6 +125,7 @@ def scrape_jobs(
     description_format: str = "markdown",
     linkedin_fetch_description: bool | None = False,
     linkedin_company_ids: list[int] | None = None,
+    linkedin_experience_levels: list[LinkedInExperienceLevel] | None = None,
     offset: int | None = 0,
     hours_old: int | None = None,
     enforce_annual_salary: bool = False,
@@ -162,6 +163,7 @@ def scrape_jobs(
         linkedin_fetch_description=linkedin_fetch_description,
         results_wanted=results_wanted,
         linkedin_company_ids=linkedin_company_ids,
+        linkedin_experience_levels=linkedin_experience_levels,
         offset=offset,
         hours_old=hours_old,
     )

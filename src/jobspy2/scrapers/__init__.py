@@ -25,6 +25,15 @@ class SalarySource(Enum):
     DESCRIPTION = "description"
 
 
+class LinkedInExperienceLevel(Enum):
+    ENTRY_LEVEL = "entry_level"
+    ASSOCIATE = "associate"
+    MID_LEVEL = "mid_level"
+    SENIOR_LEVEL = "senior_level"
+    DIRECTOR = "director"
+    EXECUTIVE = "executive"
+
+
 class ScraperInput(BaseModel):
     site_type: list[Site]
     search_term: str | None = None
@@ -39,6 +48,7 @@ class ScraperInput(BaseModel):
     offset: int = 0
     linkedin_fetch_description: bool = False
     linkedin_company_ids: list[int] | None = None
+    linkedin_experience_levels: list[LinkedInExperienceLevel] | None = None
     description_format: DescriptionFormat | None = DescriptionFormat.MARKDOWN
 
     results_wanted: int = 15
