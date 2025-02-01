@@ -53,7 +53,7 @@ def _get_site_type(site_name: str | list[str] | Site | list[Site] | None) -> lis
     elif isinstance(site_name, Site):
         site_types = [site_name]
     elif isinstance(site_name, list):
-        site_types = [Site[site] if isinstance(site, str) else site for site in site_name]
+        site_types = [Site[site.upper()] if isinstance(site, str) else site for site in site_name]
     return site_types
 
 
