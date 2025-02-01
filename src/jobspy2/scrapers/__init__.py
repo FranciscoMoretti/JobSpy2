@@ -26,10 +26,10 @@ class SalarySource(Enum):
 
 
 class LinkedInExperienceLevel(Enum):
+    INTERNSHIP = "internship"
     ENTRY_LEVEL = "entry_level"
     ASSOCIATE = "associate"
-    MID_LEVEL = "mid_level"
-    SENIOR_LEVEL = "senior_level"
+    MID_SENIOR_LEVEL = "mid_senior_level"
     DIRECTOR = "director"
     EXECUTIVE = "executive"
 

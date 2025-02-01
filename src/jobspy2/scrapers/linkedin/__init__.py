@@ -44,10 +44,10 @@ logger = create_logger("LinkedIn")
 
 # Map from experience level to the number
 experience_level_map = {
-    LinkedInExperienceLevel.ENTRY_LEVEL: "1",
-    LinkedInExperienceLevel.ASSOCIATE: "2",
-    LinkedInExperienceLevel.MID_LEVEL: "3",
-    LinkedInExperienceLevel.SENIOR_LEVEL: "4",
+    LinkedInExperienceLevel.INTERNSHIP: "1",
+    LinkedInExperienceLevel.ENTRY_LEVEL: "2",
+    LinkedInExperienceLevel.ASSOCIATE: "3",
+    LinkedInExperienceLevel.MID_SENIOR_LEVEL: "4",
     LinkedInExperienceLevel.DIRECTOR: "5",
     LinkedInExperienceLevel.EXECUTIVE: "6",
 }
