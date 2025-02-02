@@ -301,7 +301,7 @@ wheels = [
 
 [[package]]
 name = "jobspy2"
-version = "0.0.2"
+version = "0.0.5"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
