@@ -11,6 +11,7 @@ import math
 import random
 import time
 from datetime import datetime
+from typing import Any
 from urllib.parse import unquote, urlparse, urlunparse
 
 import regex as re
@@ -43,7 +44,7 @@ from .constants import headers
 logger = create_logger("LinkedIn")
 
 # Map from experience level to the number
-experience_level_map = {
+experience_level_map: dict[LinkedInExperienceLevel, str] = {
     LinkedInExperienceLevel.INTERNSHIP: "1",
     LinkedInExperienceLevel.ENTRY_LEVEL: "2",
     LinkedInExperienceLevel.ASSOCIATE: "3",
@@ -59,7 +60,7 @@ class LinkedInScraper(Scraper):
     band_delay = 4
     jobs_per_page = 25
 
-    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None):
+    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None) -> None:
         """
         Initializes LinkedInScraper with the LinkedIn job search url
         """
@@ -73,8 +74,8 @@ class LinkedInScraper(Scraper):
             clear_cookies=True,
         )
         self.session.headers.update(headers)
-        self.scraper_input = None
-        self.country = "worldwide"
+        self.scraper_input: ScraperInput | None = None
+        self.country: str = "worldwide"
         self.job_url_direct_regex = re.compile(r'(?<=\?url=)[^"]+')
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
@@ -83,7 +84,7 @@ class LinkedInScraper(Scraper):
         """
         self.scraper_input = scraper_input
         job_list: list[JobPost] = []
-        seen_ids = set()
+        seen_ids: set[str] = set()
         start = scraper_input.offset // 10 * 10 if scraper_input.offset else 0
         request_count = 0
         seconds_old = scraper_input.hours_old * 3600 if scraper_input.hours_old else None
@@ -111,9 +112,13 @@ class LinkedInScraper(Scraper):
         return JobResponse(jobs=job_list)
 
     def _should_continue_search(self, job_list: list[JobPost], start: int) -> bool:
+        if not self.scraper_input:
+            return False
         return len(job_list) < self.scraper_input.results_wanted and start < 1000
 
     def _make_search_request(self, start: int, seconds_old: int | None) -> requests.Response | None:
+        if not self.scraper_input:
+            return None
         params = self._build_search_params(start, seconds_old)
         try:
             response = self.session.get(
@@ -138,13 +143,17 @@ class LinkedInScraper(Scraper):
                 logger.exception("LinkedIn error")
             return None
 
-    def _build_search_params(self, start: int, seconds_old: int | None) -> dict:
-        params = {
+    def _build_search_params(self, start: int, seconds_old: int | None) -> dict[str, Any]:
+        if not self.scraper_input:
+            return {}
+        params: dict[str, Any] = {
             "keywords": self.scraper_input.search_term,
             "location": self.scraper_input.location,
             "distance": self.scraper_input.distance,
             "f_WT": 2 if self.scraper_input.is_remote else None,
-            "f_E": ",".join(map(experience_level_map.get, self.scraper_input.linkedin_experience_levels))
+            "f_E": ",".join(
+                experience_level_map.get(level, "") for level in self.scraper_input.linkedin_experience_levels
+            )
             if self.scraper_input.linkedin_experience_levels
             else None,
             "f_JT": (self.job_type_code(self.scraper_input.job_type) if self.scraper_input.job_type else None),
@@ -165,10 +174,14 @@ class LinkedInScraper(Scraper):
         soup = BeautifulSoup(response.text, "html.parser")
         return soup.find_all("div", class_="base-search-card")
 
-    def _process_job_cards(self, job_cards: list[Tag], job_list: list[JobPost], seen_ids: set) -> bool:
+    def _process_job_cards(self, job_cards: list[Tag], job_list: list[JobPost], seen_ids: set[str]) -> bool:
+        if not self.scraper_input:
+            return False
         for job_card in job_cards:
             href_tag = job_card.find("a", class_="base-card__full-link")
-            if not (href_tag and "href" in href_tag.attrs):
+            if not href_tag or not isinstance(href_tag, Tag):
+                continue
+            if "href" not in href_tag.attrs:
                 continue
 
             href = href_tag.attrs["href"].split("?")[0]
@@ -211,11 +224,9 @@ class LinkedInScraper(Scraper):
 
         company_tag = job_card.find("h4", class_="base-search-card__subtitle")
         company_a_tag = company_tag.find("a") if company_tag else None
-        company_url = (
-            urlunparse(urlparse(company_a_tag.get("href"))._replace(query=""))
-            if company_a_tag and company_a_tag.has_attr("href")
-            else ""
-        )
+        if not company_a_tag or not isinstance(company_a_tag, Tag):
+            return None
+        company_url = urlunparse(urlparse(href)._replace(query="")) if (href := company_a_tag.get("href")) else ""
         company = company_a_tag.get_text(strip=True) if company_a_tag else "N/A"
 
         metadata_card = job_card.find("div", class_="base-search-card__metadata")
@@ -229,7 +240,7 @@ class LinkedInScraper(Scraper):
                 date_posted = self._parse_date(datetime_str)
             except ValueError as e:
                 logger.warning(f"Failed to parse date {datetime_str}: {e}")
-        job_details = {}
+        job_details: dict[str, Any] = {}
         if full_descr:
             job_details = self._get_job_details(job_id)
 
@@ -248,16 +259,16 @@ class LinkedInScraper(Scraper):
             description=job_details.get("description"),
             job_url_direct=job_details.get("job_url_direct"),
             emails=extract_emails_from_text(job_details.get("description")),
-            company_logo=job_details.get("company_logo"),
-            job_function=job_details.get("job_function"),
         )
 
-    def _get_job_details(self, job_id: str) -> dict:
+    def _get_job_details(self, job_id: str) -> dict[str, Any]:
         """
         Retrieves job description and other job details by going to the job page url
         :param job_page_url:
         :return: dict
         """
+        if not self.scraper_input:
+            return {}
         try:
             response = self.session.get(f"{self.base_url}/jobs/view/{job_id}", timeout=5)
             response.raise_for_status()
@@ -324,7 +335,7 @@ class LinkedInScraper(Scraper):
         return location
 
     @staticmethod
-    def _parse_job_type(soup_job_type: BeautifulSoup) -> list[JobType] | None:
+    def _parse_job_type(soup_job_type: BeautifulSoup) -> list[JobType]:
         """
         Gets the job type from job page
         :param soup_job_type:

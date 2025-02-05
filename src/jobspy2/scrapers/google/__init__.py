@@ -11,6 +11,9 @@ import json
 import math
 import re
 from datetime import datetime, timedelta
+from typing import Any
+
+import requests
 
 from ...jobs import (
     JobPost,
@@ -31,20 +34,20 @@ logger = create_logger("Google")
 
 
 class GoogleJobsScraper(Scraper):
-    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None):
+    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None) -> None:
         """
         Initializes Google Scraper with the Goodle jobs search url
         """
         site = Site(Site.GOOGLE)
         super().__init__(site, proxies=proxies, ca_cert=ca_cert)
 
-        self.country = None
-        self.session = None
-        self.scraper_input = None
-        self.jobs_per_page = 10
-        self.seen_urls = set()
-        self.url = "https://www.google.com/search"
-        self.jobs_url = "https://www.google.com/async/callback:550"
+        self.country: str | None = None
+        self.session: requests.Session | None = None
+        self.scraper_input: ScraperInput | None = None
+        self.jobs_per_page: int = 10
+        self.seen_urls: set[str] = set()
+        self.url: str = "https://www.google.com/search"
+        self.jobs_url: str = "https://www.google.com/async/callback:550"
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
         """
@@ -79,12 +82,14 @@ class GoogleJobsScraper(Scraper):
 
     def _build_search_query(self) -> str:
         """Builds the search query string based on scraper input parameters"""
+        if not self.scraper_input:
+            return ""
         if self.scraper_input.google_search_term:
             return self.scraper_input.google_search_term
 
         query = f"{self.scraper_input.search_term} jobs"
 
-        job_type_mapping = {
+        job_type_mapping: dict[JobType, str] = {
             JobType.FULL_TIME: "Full time",
             JobType.PART_TIME: "Part time",
             JobType.INTERNSHIP: "Internship",
@@ -116,8 +121,10 @@ class GoogleJobsScraper(Scraper):
             return "in the last week"
         return "in the last month"
 
-    def _get_initial_cursor_and_jobs(self) -> tuple[str, list[JobPost]]:
+    def _get_initial_cursor_and_jobs(self) -> tuple[str | None, list[JobPost]]:
         """Gets initial cursor and jobs to paginate through job listings"""
+        if not self.session:
+            return None, []
         query = self._build_search_query()
         params = {"q": query, "udm": "8"}
         response = self.session.get(self.url, headers=headers_initial, params=params)
@@ -127,19 +134,21 @@ class GoogleJobsScraper(Scraper):
         data_async_fc = match_fc.group(1) if match_fc else None
 
         jobs_raw = self._find_job_info_initial_page(response.text)
-        jobs = []
+        jobs: list[JobPost] = []
         for job_raw in jobs_raw:
             job_post = self._parse_job(job_raw)
             if job_post:
                 jobs.append(job_post)
         return data_async_fc, jobs
 
-    def _get_jobs_next_page(self, forward_cursor: str) -> tuple[list[JobPost], str]:
+    def _get_jobs_next_page(self, forward_cursor: str) -> tuple[list[JobPost], str | None]:
+        if not self.session:
+            return [], None
         params = {"fc": [forward_cursor], "fcv": ["3"], "async": [async_param]}
         response = self.session.get(self.jobs_url, headers=headers_jobs, params=params)
         return self._parse_jobs(response.text)
 
-    def _parse_jobs(self, job_data: str) -> tuple[list[JobPost], str]:
+    def _parse_jobs(self, job_data: str) -> tuple[list[JobPost], str | None]:
         """
         Parses jobs on a page with next page cursor
         """
@@ -151,7 +160,7 @@ class GoogleJobsScraper(Scraper):
         pattern_fc = r'data-async-fc="([^"]+)"'
         match_fc = re.search(pattern_fc, job_data)
         data_async_fc = match_fc.group(1) if match_fc else None
-        jobs_on_page = []
+        jobs_on_page: list[JobPost] = []
         for array in parsed:
             _, job_data = array
             if not job_data.startswith("[[["):
@@ -159,15 +168,17 @@ class GoogleJobsScraper(Scraper):
             job_d = json.loads(job_data)
 
             job_info = self._find_job_info(job_d)
+            if not job_info:
+                continue
             job_post = self._parse_job(job_info)
             if job_post:
                 jobs_on_page.append(job_post)
         return jobs_on_page, data_async_fc
 
-    def _parse_job(self, job_info: list):
+    def _parse_job(self, job_info: list[Any]) -> JobPost | None:
         job_url = job_info[3][0][0] if job_info[3] and job_info[3][0] else None
-        if job_url in self.seen_urls:
-            return
+        if not job_url or job_url in self.seen_urls:
+            return None
         self.seen_urls.add(job_url)
 
         title = job_info[0]
@@ -181,11 +192,11 @@ class GoogleJobsScraper(Scraper):
         if isinstance(days_ago_str, str):
             match = re.search(r"\d+", days_ago_str)
             days_ago = int(match.group()) if match else None
-            date_posted = (datetime.now() - timedelta(days=days_ago)).date()
+            date_posted = (datetime.now() - timedelta(days=days_ago)).date() if days_ago else None
 
         description = job_info[19]
 
-        job_post = JobPost(
+        return JobPost(
             id=f"go-{job_info[28]}",
             title=title,
             company_name=company_name,
@@ -197,10 +208,9 @@ class GoogleJobsScraper(Scraper):
             emails=extract_emails_from_text(description),
             job_type=extract_job_type(description),
         )
-        return job_post
 
     @staticmethod
-    def _find_job_info(jobs_data: list | dict) -> list | None:
+    def _find_job_info(jobs_data: list[Any] | dict[str, Any]) -> list[Any] | None:
         """Iterates through the JSON data to find the job listings"""
         if isinstance(jobs_data, dict):
             for key, value in jobs_data.items():
@@ -218,12 +228,10 @@ class GoogleJobsScraper(Scraper):
         return None
 
     @staticmethod
-    def _find_job_info_initial_page(html_text: str):
+    def _find_job_info_initial_page(html_text: str) -> list[Any]:
         pattern = '520084652":(' + r"\[.*?\]\s*])\s*}\s*]\s*]\s*]"
-        results = []
+        results: list[Any] = []
         matches = re.finditer(pattern, html_text)
-
-        import json
 
         for match in matches:
             try:

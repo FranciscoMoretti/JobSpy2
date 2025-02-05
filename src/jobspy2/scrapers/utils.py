@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
 from itertools import cycle
+from typing import Any
 
 import numpy as np
 import requests
 import tls_client
+from bs4.element import Tag
 from markdownify import markdownify as md
 from requests.adapters import HTTPAdapter, Retry
 
 from ..jobs import CompensationInterval, JobType
 
 
-def create_logger(name: str):
+def create_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(f"JobSpy:{name}")
     logger.propagate = False
     if not logger.handlers:
@@ -27,16 +30,16 @@ def create_logger(name: str):
 
 
 class RotatingProxySession:
-    def __init__(self, proxies=None):
+    def __init__(self, proxies: list[str] | str | None = None) -> None:
         if isinstance(proxies, str):
-            self.proxy_cycle = cycle([self.format_proxy(proxies)])
+            self.proxy_cycle: Iterator[dict[str, str]] | None = cycle([self.format_proxy(proxies)])
         elif isinstance(proxies, list):
             self.proxy_cycle = cycle([self.format_proxy(proxy) for proxy in proxies]) if proxies else None
         else:
             self.proxy_cycle = None
 
     @staticmethod
-    def format_proxy(proxy):
+    def format_proxy(proxy: str) -> dict[str, str]:
         """Utility method to format a proxy string into a dictionary."""
         if proxy.startswith("http://") or proxy.startswith("https://"):
             return {"http": proxy, "https": proxy}
@@ -44,14 +47,20 @@ class RotatingProxySession:
 
 
 class RequestsRotating(RotatingProxySession, requests.Session):
-    def __init__(self, proxies=None, has_retry=False, delay=1, clear_cookies=False):
+    def __init__(
+        self,
+        proxies: list[str] | str | None = None,
+        has_retry: bool = False,
+        delay: int = 1,
+        clear_cookies: bool = False,
+    ) -> None:
         RotatingProxySession.__init__(self, proxies=proxies)
         requests.Session.__init__(self)
         self.clear_cookies = clear_cookies
         self.allow_redirects = True
         self.setup_session(has_retry, delay)
 
-    def setup_session(self, has_retry, delay):
+    def setup_session(self, has_retry: bool, delay: int) -> None:
         if has_retry:
             retries = Retry(
                 total=3,
@@ -64,7 +73,7 @@ class RequestsRotating(RotatingProxySession, requests.Session):
             self.mount("http://", adapter)
             self.mount("https://", adapter)
 
-    def request(self, method, url, **kwargs):
+    def request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         if self.clear_cookies:
             self.cookies.clear()
 
@@ -78,11 +87,11 @@ class RequestsRotating(RotatingProxySession, requests.Session):
 
 
 class TLSRotating(RotatingProxySession, tls_client.Session):
-    def __init__(self, proxies=None):
+    def __init__(self, proxies: list[str] | str | None = None) -> None:
         RotatingProxySession.__init__(self, proxies=proxies)
         tls_client.Session.__init__(self, random_tls_extension_order=True)
 
-    def execute_request(self, *args, **kwargs):
+    def execute_request(self, *args: Any, **kwargs: Any) -> requests.Response:
         if self.proxy_cycle:
             next_proxy = next(self.proxy_cycle)
             if next_proxy["http"] != "http://localhost":
@@ -96,7 +105,7 @@ class TLSRotating(RotatingProxySession, tls_client.Session):
 
 def create_session(
     *,
-    proxies: dict | str | None = None,
+    proxies: list[str] | str | None = None,
     ca_cert: str | None = None,
     is_tls: bool = True,
     has_retry: bool = False,
@@ -126,12 +135,12 @@ def create_session(
 class LoggingError(Exception):
     """Raised when there are logging-related errors."""
 
-    def __init__(self, level_name: str):
+    def __init__(self, level_name: str) -> None:
         self.message = f"Invalid log level: {level_name!r}"
         super().__init__(self.message)
 
 
-def set_logger_level(verbose: int = 2):
+def set_logger_level(verbose: int = 2) -> None:
     """
     Adjusts the logger's level. This function allows the logging level to be changed at runtime.
 
@@ -150,24 +159,26 @@ def set_logger_level(verbose: int = 2):
         raise LoggingError(level_name)
 
 
-def markdown_converter(description_html: str):
+def markdown_converter(description_html: str | None) -> str | None:
     if description_html is None:
         return None
     markdown = md(description_html)
-    return markdown.strip()
+    return markdown.strip() if markdown else None
 
 
-def extract_emails_from_text(text: str) -> list[str] | None:
+def extract_emails_from_text(text: str | None) -> list[str] | None:
     if not text:
         return None
     email_regex = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
     return email_regex.findall(text)
 
 
-def get_enum_from_job_type(job_type_str: str) -> JobType | None:
+def get_enum_from_job_type(job_type_str: str | None) -> JobType | None:
     """
     Given a string, returns the corresponding JobType enum member if a match is found.
     """
+    if not job_type_str:
+        return None
     res = None
     for job_type in JobType:
         if job_type_str in job_type.value:
@@ -175,7 +186,7 @@ def get_enum_from_job_type(job_type_str: str) -> JobType | None:
     return res
 
 
-def currency_parser(cur_str):
+def currency_parser(cur_str: str) -> float:
     # Remove any non-numerical characters
     # except for ',' '.' or '-' (e.g. EUR)
     cur_str = re.sub("[^-0-9.,]", "", cur_str)
@@ -192,20 +203,20 @@ def currency_parser(cur_str):
     return np.round(num, 2)
 
 
-def remove_attributes(tag):
+def remove_attributes(tag: Tag) -> Tag:
     for attr in list(tag.attrs):
         del tag[attr]
     return tag
 
 
 def extract_salary(
-    salary_str,
-    lower_limit=1000,
-    upper_limit=700000,
-    hourly_threshold=350,
-    monthly_threshold=30000,
-    enforce_annual_salary=False,
-):
+    salary_str: str | None,
+    lower_limit: int = 1000,
+    upper_limit: int = 700000,
+    hourly_threshold: int = 350,
+    monthly_threshold: int = 30000,
+    enforce_annual_salary: bool = False,
+) -> tuple[str | None, float | None, float | None, str | None]:
     """
     Extracts salary information from a string and returns the salary interval, min and max salary values, and currency.
     (TODO: Needs test cases as the regex is complicated and may not cover all edge cases)
@@ -257,92 +268,103 @@ def calculate_salary_range(
     hourly_threshold: int,
     monthly_threshold: int,
     enforce_annual_salary: bool,
-) -> tuple[str, float, float, str] | tuple[None, None, None, None]:
+) -> tuple[str | None, float | None, float | None, str | None]:
+    """
+    Calculates the salary range based on the input parameters.
+    Returns a tuple of (interval, min_salary, max_salary, currency).
+    """
     interval, annual_min, annual_max = determine_interval_and_annual_values(
         min_salary, max_salary, hourly_threshold, monthly_threshold
     )
 
-    if not annual_max:
+    if enforce_annual_salary and interval != CompensationInterval.YEARLY:
         return None, None, None, None
 
-    if not is_valid_salary_range(annual_min, annual_max, lower_limit, upper_limit):
+    if annual_min is not None and not is_valid_salary_range(
+        annual_min, annual_max or annual_min, lower_limit, upper_limit
+    ):
         return None, None, None, None
 
-    if enforce_annual_salary:
-        return interval, annual_min, annual_max, "USD"
     return interval, min_salary, max_salary, "USD"
 
 
 def determine_interval_and_annual_values(
     min_salary: int, max_salary: int, hourly_threshold: int, monthly_threshold: int
-) -> tuple[str, float, float | None]:
+) -> tuple[str, float | None, float | None]:
+    """
+    Determines the salary interval and calculates annual values.
+    Returns a tuple of (interval, annual_min, annual_max).
+    """
     if min_salary < hourly_threshold:
-        return (
-            CompensationInterval.HOURLY.value,
-            min_salary * 2080,
-            max_salary * 2080 if max_salary < hourly_threshold else None,
-        )
+        interval = CompensationInterval.HOURLY
+        annual_min = min_salary * 2080  # 40 hours/week * 52 weeks
+        annual_max = max_salary * 2080 if max_salary else None
     elif min_salary < monthly_threshold:
-        return (
-            CompensationInterval.MONTHLY.value,
-            min_salary * 12,
-            max_salary * 12 if max_salary < monthly_threshold else None,
-        )
-    return CompensationInterval.YEARLY.value, min_salary, max_salary
+        interval = CompensationInterval.MONTHLY
+        annual_min = min_salary * 12
+        annual_max = max_salary * 12 if max_salary else None
+    else:
+        interval = CompensationInterval.YEARLY
+        annual_min = min_salary
+        annual_max = max_salary if max_salary else None
+
+    return interval, annual_min, annual_max
 
 
 def is_valid_salary_range(annual_min: float, annual_max: float, lower_limit: int, upper_limit: int) -> bool:
-    return (
-        lower_limit <= annual_min <= upper_limit
-        and lower_limit <= annual_max <= upper_limit
-        and annual_min < annual_max
-    )
+    """
+    Checks if the salary range is valid based on the given limits.
+    """
+    return lower_limit <= annual_min <= upper_limit and lower_limit <= annual_max <= upper_limit
 
 
-def extract_job_type(description: str):
+def extract_job_type(description: str | None) -> list[JobType]:
+    """
+    Extracts job type from job description.
+    """
     if not description:
         return []
 
-    keywords = {
-        JobType.FULL_TIME: r"full\s?time",
-        JobType.PART_TIME: r"part\s?time",
-        JobType.INTERNSHIP: r"internship",
-        JobType.CONTRACT: r"contract",
-    }
+    job_types: list[JobType] = []
+    for job_type in JobType:
+        if any(keyword.lower() in description.lower() for keyword in job_type.value):
+            job_types.append(job_type)
 
-    listing_types = []
-    for key, pattern in keywords.items():
-        if re.search(pattern, description, re.IGNORECASE):
-            listing_types.append(key)
-
-    return listing_types if listing_types else None
+    return job_types
 
 
 def setup_logger(logger_name: str) -> logging.Logger:
+    """
+    Sets up a logger with the given name.
+    """
     logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+
     if not logger.handlers:
-        logger.setLevel(logging.INFO)
-        console_handler = logging.StreamHandler()
-        log_format = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-        formatter = logging.Formatter(log_format)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
     return logger
 
 
 class InvalidLogLevelError(Exception):
-    """Raised when an invalid logging level is provided."""
+    """Raised when an invalid log level is provided."""
 
-    def __init__(self, level_name: str):
-        self.message = f"Invalid logging level: {level_name!r}"
+    def __init__(self, level_name: str) -> None:
+        self.message = f"Invalid log level: {level_name!r}"
         super().__init__(self.message)
 
 
 def set_log_level(level_name: str) -> None:
+    """
+    Sets the log level for all loggers.
+    """
     level = getattr(logging, level_name.upper(), None)
-    if level is not None:
-        for logger_name in logging.root.manager.loggerDict:
-            if logger_name.startswith("jobspy2"):
-                logging.getLogger(logger_name).setLevel(level)
-    else:
+    if level is None:
         raise InvalidLogLevelError(level_name)
+
+    for logger_name in logging.root.manager.loggerDict:
+        if logger_name.startswith("JobSpy:"):
+            logging.getLogger(logger_name).setLevel(level)

@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
+import requests
 from bs4 import BeautifulSoup
 
 from ...jobs import (
@@ -43,20 +44,20 @@ class ZipRecruiterScraper(Scraper):
     base_url = "https://www.ziprecruiter.com"
     api_url = "https://api.ziprecruiter.com"
 
-    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None):
+    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None) -> None:
         """
         Initializes ZipRecruiterScraper with the ZipRecruiter job search url
         """
         super().__init__(Site.ZIP_RECRUITER, proxies=proxies)
 
-        self.scraper_input = None
-        self.session = create_session(proxies=proxies, ca_cert=ca_cert)
+        self.scraper_input: ScraperInput | None = None
+        self.session: requests.Session = create_session(proxies=proxies, ca_cert=ca_cert)
         self.session.headers.update(headers)
         self._get_cookies()
 
-        self.delay = 5
-        self.jobs_per_page = 20
-        self.seen_urls = set()
+        self.delay: int = 5
+        self.jobs_per_page: int = 20
+        self.seen_urls: set[str] = set()
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
         """
@@ -93,7 +94,7 @@ class ZipRecruiterScraper(Scraper):
         :param continue_token:
         :return: jobs found on page
         """
-        jobs_list = []
+        jobs_list: list[JobPost] = []
         params = self._add_params(scraper_input)
         if continue_token:
             params["continue_from"] = continue_token
@@ -115,22 +116,24 @@ class ZipRecruiterScraper(Scraper):
             return jobs_list, ""
 
         res_data = res.json()
-        jobs_list = res_data.get("jobs", [])
+        jobs_data = res_data.get("jobs", [])
         next_continue_token = res_data.get("continue", None)
         with ThreadPoolExecutor(max_workers=self.jobs_per_page) as executor:
-            job_results = [executor.submit(self._process_job, job) for job in jobs_list]
+            job_results = [executor.submit(self._process_job, job) for job in jobs_data]
 
         job_list = list(filter(None, (result.result() for result in job_results)))
         return job_list, next_continue_token
 
-    def _process_job(self, job: dict) -> JobPost | None:
+    def _process_job(self, job: dict[str, Any]) -> JobPost | None:
         """
         Processes an individual job dict from the response
         """
-        title = job.get("name")
+        if not self.scraper_input:
+            return None
+        title = job.get("name") or "N/A"
         job_url = f"{self.base_url}/jobs//j?lvk={job['listing_key']}"
         if job_url in self.seen_urls:
-            return
+            return None
         self.seen_urls.add(job_url)
 
         description = job.get("job_description", "").strip()
@@ -155,7 +158,7 @@ class ZipRecruiterScraper(Scraper):
         description_full, job_url_direct = self._get_descr(job_url)
 
         return JobPost(
-            id=f'zr-{job["listing_key"]}',
+            id=f"zr-{job['listing_key']}",
             title=title,
             company_name=company,
             location=location,
@@ -174,7 +177,14 @@ class ZipRecruiterScraper(Scraper):
             listing_type=listing_type,
         )
 
-    def _get_descr(self, job_url):
+    def _get_descr(self, job_url: str) -> tuple[str | None, str | None]:
+        """
+        Gets the full job description and direct job URL from the job page
+        :param job_url: The job page URL
+        :return: Tuple of (description, direct job URL)
+        """
+        if not self.scraper_input:
+            return None, None
         res = self.session.get(job_url, allow_redirects=True)
         description_full = job_url_direct = None
         if res.ok:
@@ -199,27 +209,40 @@ class ZipRecruiterScraper(Scraper):
 
         return description_full, job_url_direct
 
-    def _get_cookies(self):
+    def _get_cookies(self) -> None:
+        """
+        Gets initial cookies from ZipRecruiter
+        """
         data = "event_type=session&logged_in=false&number_of_retry=1&property=model%3AiPhone&property=os%3AiOS&property=locale%3Aen_us&property=app_build_number%3A4734&property=app_version%3A91.0&property=manufacturer%3AApple&property=timestamp%3A2024-01-12T12%3A04%3A42-06%3A00&property=screen_height%3A852&property=os_version%3A16.6.1&property=source%3Ainstall&property=screen_width%3A393&property=device_model%3AiPhone%2014%20Pro&property=brand%3AApple"
         url = f"{self.api_url}/jobs-app/event"
         self.session.post(url, data=data)
 
     @staticmethod
     def _get_job_type_enum(job_type_str: str) -> list[JobType] | None:
+        """
+        Gets the job type enum from a string
+        :param job_type_str: The job type string
+        :return: List of JobType enums or None
+        """
         for job_type in JobType:
             if job_type_str in job_type.value:
                 return [job_type]
         return None
 
     @staticmethod
-    def _add_params(scraper_input) -> dict[str, str | Any]:
-        params = {
+    def _add_params(scraper_input: ScraperInput) -> dict[str, str | Any]:
+        """
+        Adds parameters to the request
+        :param scraper_input: The scraper input
+        :return: Dictionary of parameters
+        """
+        params: dict[str, str | Any] = {
             "search": scraper_input.search_term,
             "location": scraper_input.location,
         }
         if scraper_input.hours_old:
             params["days"] = max(scraper_input.hours_old // 24, 1)
-        job_type_map = {JobType.FULL_TIME: "full_time", JobType.PART_TIME: "part_time"}
+        job_type_map: dict[JobType, str] = {JobType.FULL_TIME: "full_time", JobType.PART_TIME: "part_time"}
         if scraper_input.job_type:
             job_type = scraper_input.job_type
             params["employment_type"] = job_type_map.get(job_type, job_type.value[0])

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -134,14 +135,14 @@ class Country(Enum):
     WORLDWIDE = ("worldwide", "www")
 
     @property
-    def indeed_domain_value(self):
+    def indeed_domain_value(self) -> tuple[str, str]:
         subdomain, _, api_country_code = self.value[1].partition(":")
         if subdomain and api_country_code:
             return subdomain, api_country_code.upper()
         return self.value[1], self.value[1].upper()
 
     @property
-    def glassdoor_domain_value(self):
+    def glassdoor_domain_value(self) -> str:
         if len(self.value) == 3:
             subdomain, _, domain = self.value[2].partition(":")
             if subdomain and domain:
@@ -151,11 +152,11 @@ class Country(Enum):
         else:
             raise GlassdoorError(self.name)
 
-    def get_glassdoor_url(self):
+    def get_glassdoor_url(self) -> str:
         return f"https://{self.glassdoor_domain_value}/"
 
     @classmethod
-    def from_string(cls, country_str: str):
+    def from_string(cls, country_str: str) -> Country:
         """Convert a string to the corresponding Country enum."""
         country_str = country_str.strip().lower()
         for country in cls:
@@ -172,7 +173,7 @@ class Location(BaseModel):
     state: str | None = None
 
     def display_location(self) -> str:
-        location_parts = []
+        location_parts: list[str] = []
         if self.city:
             location_parts.append(self.city)
         if self.state:
@@ -201,15 +202,15 @@ class CompensationInterval(Enum):
     HOURLY = "hourly"
 
     @classmethod
-    def get_interval(cls, pay_period):
-        interval_mapping = {
+    def get_interval(cls, pay_period: str) -> CompensationInterval | None:
+        interval_mapping: dict[str, CompensationInterval] = {
             "YEAR": cls.YEARLY,
             "HOUR": cls.HOURLY,
         }
         if pay_period in interval_mapping:
-            return interval_mapping[pay_period].value
+            return interval_mapping[pay_period]
         else:
-            return cls[pay_period].value if pay_period in cls.__members__ else None
+            return cls[pay_period] if pay_period in cls.__members__ else None
 
 
 class Compensation(BaseModel):
@@ -266,16 +267,16 @@ class JobResponse(BaseModel):
 
 
 class CountryError(Exception):
-    """Raised when an invalid country is provided."""
+    """Raised when a country string cannot be converted to a Country enum."""
 
-    def __init__(self, country_str: str, valid_countries: list):
-        self.message = f"Invalid country: {country_str!r}. Valid countries: {', '.join(c[0] for c in valid_countries)}"
+    def __init__(self, country_str: str, valid_countries: list[Any]) -> None:
+        self.message = f"Country {country_str!r} not found. Valid countries: {valid_countries}"
         super().__init__(self.message)
 
 
 class GlassdoorError(Exception):
-    """Raised when Glassdoor is not available for a country."""
+    """Raised when a Glassdoor domain cannot be found for a country."""
 
-    def __init__(self, country_name: str):
-        self.message = f"Glassdoor is not available for {country_name}"
+    def __init__(self, country_name: str) -> None:
+        self.message = f"Glassdoor domain not found for country {country_name!r}"
         super().__init__(self.message)

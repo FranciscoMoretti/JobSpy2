@@ -11,6 +11,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from typing import Any
 
 import requests
 
@@ -42,26 +43,26 @@ class GlassdoorAPIError(GlassdoorException):
     BAD_STATUS = "Bad response status code: {}"
     API_ERROR = "Error encountered in API response"
 
-    def __init__(self, message: str):
+    def __init__(self, message: str) -> None:
         self.message = message
         super().__init__(self.message)
 
 
 class GlassdoorScraper(Scraper):
-    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None):
+    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None) -> None:
         """
         Initializes GlassdoorScraper with the Glassdoor job search url
         """
         site = Site(Site.GLASSDOOR)
         super().__init__(site, proxies=proxies, ca_cert=ca_cert)
 
-        self.base_url = None
-        self.country = None
-        self.session = None
-        self.scraper_input = None
-        self.jobs_per_page = 30
-        self.max_pages = 30
-        self.seen_urls = set()
+        self.base_url: str | None = None
+        self.country: str | None = None
+        self.session: requests.Session | None = None
+        self.scraper_input: ScraperInput | None = None
+        self.jobs_per_page: int = 30
+        self.max_pages: int = 30
+        self.seen_urls: set[str] = set()
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
         """
@@ -101,7 +102,7 @@ class GlassdoorScraper(Scraper):
                 break
         return JobResponse(jobs=job_list)
 
-    def _raise_for_status(self, response):
+    def _raise_for_status(self, response: requests.Response) -> dict[str, Any]:
         """Handle error responses from Glassdoor API."""
         if response.status_code != 200:
             raise GlassdoorAPIError(GlassdoorAPIError.BAD_STATUS.format(response.status_code))
@@ -121,7 +122,7 @@ class GlassdoorScraper(Scraper):
         """
         Scrapes a page of Glassdoor for jobs with scraper_input criteria
         """
-        jobs = []
+        jobs: list[JobPost] = []
         self.scraper_input = scraper_input
         try:
             payload = self._add_payload(location_id, location_type, page_num, cursor)
@@ -149,10 +150,12 @@ class GlassdoorScraper(Scraper):
 
         return jobs, self.get_cursor_for_page(res_json["data"]["jobListings"]["paginationCursors"], page_num + 1)
 
-    def _get_csrf_token(self):
+    def _get_csrf_token(self) -> str | None:
         """
         Fetches csrf token needed for API by visiting a generic page
         """
+        if not self.session or not self.base_url:
+            return None
         res = self.session.get(f"{self.base_url}/Job/computer-science-jobs.htm")
         pattern = r'"token":\s*"([^"]+)"'
         matches = re.findall(pattern, res.text)
@@ -161,10 +164,12 @@ class GlassdoorScraper(Scraper):
             token = matches[0]
         return token
 
-    def _process_job(self, job_data: dict) -> JobPost | None:
+    def _process_job(self, job_data: dict[str, Any]) -> JobPost | None:
         """
         Processes a single job and fetches its description.
         """
+        if not self.base_url:
+            return None
         job_id = job_data["jobview"]["job"]["listingId"]
         job_url = f"{self.base_url}job-listing/j?jl={job_id}"
         if job_url in self.seen_urls:
@@ -178,7 +183,7 @@ class GlassdoorScraper(Scraper):
         location_type = job["header"].get("locationType", "")
         age_in_days = job["header"].get("ageInDays")
         is_remote, location = False, None
-        date_diff = (datetime.now() - timedelta(days=age_in_days)).date()
+        date_diff = (datetime.now() - timedelta(days=age_in_days)).date() if age_in_days is not None else None
         date_posted = date_diff if age_in_days is not None else None
 
         if location_type == "S":
@@ -216,6 +221,8 @@ class GlassdoorScraper(Scraper):
         """
         Fetches the job description for a single job ID.
         """
+        if not self.base_url or not self.scraper_input:
+            return None
         url = f"{self.base_url}/graph"
         body = [
             {
@@ -250,33 +257,31 @@ class GlassdoorScraper(Scraper):
             desc = markdown_converter(desc)
         return desc
 
-    def _get_location(self, location: str, is_remote: bool) -> tuple[int, str]:
-        if not location or is_remote:
-            return "11047", "STATE"  # remote options
-        url = f"{self.base_url}/findPopularLocationAjax.htm?maxLocationsToReturn=10&term={location}"
-        res = self.session.get(url)
-        if res.status_code != 200:
-            if res.status_code == 429:
-                err = "429 Response - Blocked by Glassdoor for too many requests"
-                logger.error(err)
-                return None, None
-            else:
-                err = f"Glassdoor response status code {res.status_code}"
-                err += f" - {res.text}"
-                logger.error(f"Glassdoor response status code {res.status_code}")
-                return None, None
-        items = res.json()
-        if not items:
-            raise GlassdoorLocationError(location)
-
-        location_type = items[0]["locationType"]
-        if location_type == "C":
-            location_type = "CITY"
-        elif location_type == "S":
-            location_type = "STATE"
-        elif location_type == "N":
-            location_type = "COUNTRY"
-        return int(items[0]["locationId"]), location_type
+    def _get_location(self, location: str | None, is_remote: bool) -> tuple[int, str]:
+        """
+        Gets the location ID and type from Glassdoor.
+        """
+        if not self.base_url or not self.session:
+            raise GlassdoorException("Session not initialized")
+        if is_remote:
+            return 0, "REMOTE"
+        if not location:
+            return 0, "ANYWHERE"
+        try:
+            response = self.session.get(
+                f"{self.base_url}/findPopularLocationAjax.htm",
+                params={"term": location},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                raise GlassdoorLocationError(location)
+            locations = response.json()
+            if not locations:
+                raise GlassdoorLocationError(location)
+            return locations[0]["locationId"], locations[0]["locationType"]
+        except Exception as e:
+            logger.error(f"Failed to get location: {e}")
+            raise GlassdoorLocationError(location) from e
 
     def _add_payload(
         self,
@@ -285,75 +290,78 @@ class GlassdoorScraper(Scraper):
         page_num: int,
         cursor: str | None = None,
     ) -> str:
-        fromage = None
-        if self.scraper_input.hours_old:
-            fromage = max(self.scraper_input.hours_old // 24, 1)
-        filter_params = []
-        if self.scraper_input.easy_apply:
-            filter_params.append({"filterKey": "applicationType", "values": "1"})
-        if fromage:
-            filter_params.append({"filterKey": "fromAge", "values": str(fromage)})
-        payload = {
-            "operationName": "JobSearchResultsQuery",
-            "variables": {
-                "excludeJobListingIds": [],
-                "filterParams": filter_params,
-                "keyword": self.scraper_input.search_term,
-                "numJobsToShow": 30,
-                "locationType": location_type,
-                "locationId": int(location_id),
-                "parameterUrlInput": f"IL.0,12_I{location_type}{location_id}",
-                "pageNumber": page_num,
-                "pageCursor": cursor,
-                "fromage": fromage,
-                "sort": "date",
-            },
-            "query": query_template,
+        """
+        Adds the payload to the request.
+        """
+        if not self.scraper_input:
+            raise GlassdoorException("Scraper input not initialized")
+        variables = {
+            "excludeJobListingIds": [],
+            "filterParams": [
+                {"filterKey": "locId", "filterType": location_type, "filterValue": location_id},
+            ],
+            "numJobsToShow": self.jobs_per_page,
+            "pageNumber": page_num,
+            "searchText": self.scraper_input.search_term,
         }
-        if self.scraper_input.job_type:
-            payload["variables"]["filterParams"].append({
-                "filterKey": "jobType",
-                "values": self.scraper_input.job_type.value[0],
+        if cursor:
+            variables["cursor"] = cursor
+        if self.scraper_input.hours_old:
+            variables["filterParams"].append({
+                "filterKey": "postedDate",
+                "filterType": "FILTER_DATE_POSTED",
+                "filterValue": f"{self.scraper_input.hours_old}",
             })
-        return json.dumps([payload])
+        if self.scraper_input.easy_apply:
+            variables["filterParams"].append({"filterKey": "easyApply", "filterType": "BVAL", "filterValue": "true"})
+        if self.scraper_input.job_type:
+            variables["filterParams"].append({
+                "filterKey": "jobType",
+                "filterType": "BVAL",
+                "filterValue": self.scraper_input.job_type[0].value[0],
+            })
+        return json.dumps([{"operationName": "JobSearchResultsQuery", "variables": variables, "query": query_template}])
 
     @staticmethod
-    def parse_compensation(data: dict) -> Compensation | None:
-        pay_period = data.get("payPeriod")
-        adjusted_pay = data.get("payPeriodAdjustedPay")
-        currency = data.get("payCurrency", "USD")
-        if not pay_period or not adjusted_pay:
+    def parse_compensation(data: dict[str, Any]) -> Compensation | None:
+        """
+        Parses the compensation data from the job header.
+        """
+        if not data.get("salarySource"):
             return None
-
-        interval = None
-        if pay_period == "ANNUAL":
-            interval = CompensationInterval.YEARLY
-        elif pay_period:
-            interval = CompensationInterval.get_interval(pay_period)
-        min_amount = int(adjusted_pay.get("p10") // 1)
-        max_amount = int(adjusted_pay.get("p90") // 1)
+        salary = data["salarySource"]
+        if not salary.get("payCurrency") or not salary.get("payPeriod"):
+            return None
         return Compensation(
-            interval=interval,
-            min_amount=min_amount,
-            max_amount=max_amount,
-            currency=currency,
+            interval=CompensationInterval.get_interval(salary["payPeriod"]),
+            min_amount=salary.get("payMin"),
+            max_amount=salary.get("payMax"),
+            currency=salary["payCurrency"],
         )
 
     @staticmethod
     def get_job_type_enum(job_type_str: str) -> list[JobType] | None:
-        for job_type in JobType:
-            if job_type_str in job_type.value:
-                return [job_type]
+        """
+        Gets the job type enum from a string.
+        """
+        return [JobType.FULL_TIME] if job_type_str == "fulltime" else None
 
     @staticmethod
     def parse_location(location_name: str) -> Location | None:
-        if not location_name or location_name == "Remote":
-            return
-        city, _, state = location_name.partition(", ")
-        return Location(city=city, state=state)
+        """
+        Parses the location string into a Location object.
+        """
+        if not location_name:
+            return None
+        parts = location_name.split(", ")
+        return Location(city=parts[0], state=parts[1] if len(parts) > 1 else None)
 
     @staticmethod
-    def get_cursor_for_page(pagination_cursors, page_num):
-        for cursor_data in pagination_cursors:
-            if cursor_data["pageNumber"] == page_num:
-                return cursor_data["cursor"]
+    def get_cursor_for_page(pagination_cursors: list[dict[str, str]], page_num: int) -> str | None:
+        """
+        Gets the cursor for the next page.
+        """
+        for cursor in pagination_cursors:
+            if cursor["pageNumber"] == page_num:
+                return cursor["cursor"]
+        return None

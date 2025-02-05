@@ -40,7 +40,7 @@ class ScraperInput(BaseModel):
     google_search_term: str | None = None
 
     location: str | None = None
-    country: Country | None = Country.USA
+    country: Country = Country.USA
     distance: int | None = None
     is_remote: bool = False
     job_type: JobType | None = None
@@ -56,7 +56,7 @@ class ScraperInput(BaseModel):
 
 
 class Scraper(ABC):
-    def __init__(self, site: Site, proxies: list[str] | None = None, ca_cert: str | None = None):
+    def __init__(self, site: Site, proxies: list[str] | str | None = None, ca_cert: str | None = None):
         self.site = site
         self.proxies = proxies
         self.ca_cert = ca_cert

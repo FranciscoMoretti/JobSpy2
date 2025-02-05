@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
+from typing import Any
 
 from ...jobs import (
     Compensation,
@@ -35,28 +36,28 @@ logger = create_logger("Indeed")
 class IntervalError(ValueError):
     """Raised when an unsupported interval is provided."""
 
-    def __init__(self, interval: str, is_compensation: bool = False):
+    def __init__(self, interval: str, is_compensation: bool = False) -> None:
         prefix = "compensation " if is_compensation else ""
         self.message = f"Unsupported {prefix}interval: {interval!r}"
         super().__init__(self.message)
 
 
 class IndeedScraper(Scraper):
-    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None):
+    def __init__(self, proxies: list[str] | str | None = None, ca_cert: str | None = None) -> None:
         """
         Initializes IndeedScraper with the Indeed API url
         """
         super().__init__(Site.INDEED, proxies=proxies)
 
         self.session = create_session(proxies=self.proxies, ca_cert=ca_cert, is_tls=False)
-        self.scraper_input = None
-        self.jobs_per_page = 100
-        self.num_workers = 10
-        self.seen_urls = set()
-        self.headers = None
-        self.api_country_code = None
-        self.base_url = None
-        self.api_url = "https://apis.indeed.com/graphql"
+        self.scraper_input: ScraperInput | None = None
+        self.jobs_per_page: int = 100
+        self.num_workers: int = 10
+        self.seen_urls: set[str] = set()
+        self.headers: dict[str, str] | None = None
+        self.api_country_code: str | None = None
+        self.base_url: str | None = None
+        self.api_url: str = "https://apis.indeed.com/graphql"
 
     def scrape(self, scraper_input: ScraperInput) -> JobResponse:
         """
@@ -68,8 +69,8 @@ class IndeedScraper(Scraper):
         domain, self.api_country_code = self.scraper_input.country.indeed_domain_value
         self.base_url = f"https://{domain}.indeed.com"
         self.headers = api_headers.copy()
-        self.headers["indeed-co"] = self.scraper_input.country.indeed_domain_value
-        job_list = []
+        self.headers["indeed-co"] = self.api_country_code
+        job_list: list[JobPost] = []
         page = 1
 
         cursor = None
@@ -90,7 +91,9 @@ class IndeedScraper(Scraper):
         :param cursor:
         :return: jobs found on page, next page cursor
         """
-        jobs = []
+        if not self.scraper_input or not self.api_country_code:
+            return [], None
+        jobs: list[JobPost] = []
         new_cursor = None
         filters = self._build_filters()
         search_term = self.scraper_input.search_term.replace('"', '\\"') if self.scraper_input.search_term else ""
@@ -122,22 +125,24 @@ class IndeedScraper(Scraper):
             )
             return jobs, new_cursor
         data = response.json()
-        jobs = data["data"]["jobSearch"]["results"]
+        jobs_data = data["data"]["jobSearch"]["results"]
         new_cursor = data["data"]["jobSearch"]["pageInfo"]["nextCursor"]
 
-        job_list = []
-        for job in jobs:
+        job_list: list[JobPost] = []
+        for job in jobs_data:
             processed_job = self._process_job(job["job"])
             if processed_job:
                 job_list.append(processed_job)
 
         return job_list, new_cursor
 
-    def _build_filters(self):
+    def _build_filters(self) -> str:
         """
         Builds the filters dict for job type/is_remote. If hours_old is provided, composite filter for job_type/is_remote is not possible.
         IndeedApply: filters: { keyword: { field: "indeedApplyScope", keys: ["DESKTOP"] } }
         """
+        if not self.scraper_input:
+            return ""
         filters_str = ""
         if self.scraper_input.hours_old:
             filters_str = f"""
@@ -158,14 +163,14 @@ class IndeedScraper(Scraper):
             }
             """
         elif self.scraper_input.job_type or self.scraper_input.is_remote:
-            job_type_key_mapping = {
+            job_type_key_mapping: dict[JobType, str] = {
                 JobType.FULL_TIME: "CF3CP",
                 JobType.PART_TIME: "75GKK",
                 JobType.CONTRACT: "NJXCK",
                 JobType.INTERNSHIP: "VDTG7",
             }
 
-            keys = []
+            keys: list[str] = []
             if self.scraper_input.job_type:
                 key = job_type_key_mapping[self.scraper_input.job_type]
                 keys.append(key)
@@ -189,15 +194,17 @@ class IndeedScraper(Scraper):
                 """
         return filters_str
 
-    def _process_job(self, job: dict) -> JobPost | None:
+    def _process_job(self, job: dict[str, Any]) -> JobPost | None:
         """
         Parses the job dict into JobPost model
         :param job: dict to parse
         :return: JobPost if it's a new job
         """
-        job_url = f'{self.base_url}/viewjob?jk={job["key"]}'
+        if not self.base_url or not self.scraper_input:
+            return None
+        job_url = f"{self.base_url}/viewjob?jk={job['key']}"
         if job_url in self.seen_urls:
-            return
+            return None
         self.seen_urls.add(job_url)
         description = job["description"]["html"]
         if self.scraper_input.description_format == DescriptionFormat.MARKDOWN:
@@ -205,12 +212,12 @@ class IndeedScraper(Scraper):
 
         job_type = self._get_job_type(job["attributes"])
         timestamp_seconds = job["datePublished"] / 1000
-        date_posted = datetime.fromtimestamp(timestamp_seconds).strftime("%Y-%m-%d")
+        date_posted = datetime.fromtimestamp(timestamp_seconds).date()
         employer = job["employer"].get("dossier") if job["employer"] else None
         employer_details = employer.get("employerDetails", {}) if employer else {}
         rel_url = job["employer"]["relativeCompanyPageUrl"] if job["employer"] else None
         return JobPost(
-            id=f'in-{job["key"]}',
+            id=f"in-{job['key']}",
             title=job["title"],
             description=description,
             company_name=job["employer"].get("name") if job.get("employer") else None,
@@ -241,7 +248,7 @@ class IndeedScraper(Scraper):
         )
 
     @staticmethod
-    def _get_job_type(attributes: list) -> list[JobType]:
+    def _get_job_type(attributes: list[dict[str, str]]) -> list[JobType]:
         """
         Parses the attributes to get list of job types
         :param attributes:
@@ -249,69 +256,69 @@ class IndeedScraper(Scraper):
         """
         job_types: list[JobType] = []
         for attribute in attributes:
-            job_type_str = attribute["label"].replace("-", "").replace(" ", "").lower()
-            job_type = get_enum_from_job_type(job_type_str)
-            if job_type:
-                job_types.append(job_type)
+            if attribute["type"] == "jobtype":
+                job_type = get_enum_from_job_type(attribute["label"].lower())
+                if job_type:
+                    job_types.append(job_type)
         return job_types
 
     @staticmethod
-    def _get_compensation(compensation: dict) -> Compensation | None:
+    def _get_compensation(compensation: dict[str, Any] | None) -> Compensation | None:
         """
-        Parses the job to get compensation
-        :param job:
-        :return: compensation object
+        Parses the compensation dict into Compensation model
+        :param compensation:
+        :return: Compensation
         """
-        if not compensation["baseSalary"] and not compensation["estimated"]:
+        if not compensation:
             return None
-        comp = compensation["baseSalary"] if compensation["baseSalary"] else compensation["estimated"]["baseSalary"]
-        if not comp:
-            return None
-        interval = IndeedScraper._get_compensation_interval(comp["unitOfWork"])
+        interval = compensation.get("interval")
         if not interval:
             return None
-        min_range = comp["range"].get("min")
-        max_range = comp["range"].get("max")
         return Compensation(
-            interval=interval,
-            min_amount=int(min_range) if min_range is not None else None,
-            max_amount=int(max_range) if max_range is not None else None,
-            currency=(
-                compensation["estimated"]["currencyCode"] if compensation["estimated"] else compensation["currencyCode"]
-            ),
+            interval=CompensationInterval.get_interval(interval),
+            min_amount=compensation.get("min"),
+            max_amount=compensation.get("max"),
+            currency=compensation.get("currency", "USD"),
         )
 
     @staticmethod
-    def _is_job_remote(job: dict, description: str) -> bool:
+    def _is_job_remote(job: dict[str, Any], description: str) -> bool:
         """
-        Searches the description, location, and attributes to check if job is remote
+        Checks if job is remote
+        :param job:
+        :param description:
+        :return: bool
         """
-        remote_keywords = ["remote", "work from home", "wfh"]
-        is_remote_in_attributes = any(
-            any(keyword in attr["label"].lower() for keyword in remote_keywords) for attr in job["attributes"]
-        )
-        is_remote_in_description = any(keyword in description.lower() for keyword in remote_keywords)
-        is_remote_in_location = any(
-            keyword in job["location"]["formatted"]["long"].lower() for keyword in remote_keywords
-        )
-        return is_remote_in_attributes or is_remote_in_description or is_remote_in_location
+        if job.get("workplaceType") == "REMOTE":
+            return True
+        if description and ("remote" in description.lower() or "wfh" in description.lower()):
+            return True
+        return False
 
     @staticmethod
     def _get_compensation_interval(interval: str) -> CompensationInterval:
-        interval_mapping = {
-            "DAY": "DAILY",
-            "YEAR": "YEARLY",
-            "HOUR": "HOURLY",
-            "WEEK": "WEEKLY",
-            "MONTH": "MONTHLY",
+        """
+        Gets the compensation interval from string
+        :param interval:
+        :return: CompensationInterval
+        """
+        interval_mapping: dict[str, CompensationInterval] = {
+            "YEARLY": CompensationInterval.YEARLY,
+            "MONTHLY": CompensationInterval.MONTHLY,
+            "WEEKLY": CompensationInterval.WEEKLY,
+            "DAILY": CompensationInterval.DAILY,
+            "HOURLY": CompensationInterval.HOURLY,
         }
-        mapped_interval = interval_mapping.get(interval.upper(), None)
-        if mapped_interval and mapped_interval in CompensationInterval.__members__:
-            return CompensationInterval[mapped_interval]
-        raise IntervalError(interval)
+        if interval not in interval_mapping:
+            raise IntervalError(interval, is_compensation=True)
+        return interval_mapping[interval]
 
     def _parse_compensation_interval(self, interval: str) -> CompensationInterval:
-        mapped_interval = self.INTERVAL_MAPPING.get(interval)
-        if mapped_interval:
-            return CompensationInterval[mapped_interval]
-        raise IntervalError(interval, is_compensation=True)
+        """
+        Parses the compensation interval from string
+        :param interval:
+        :return: CompensationInterval
+        """
+        if not interval:
+            raise IntervalError(interval, is_compensation=True)
+        return self._get_compensation_interval(interval)
